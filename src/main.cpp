@@ -78,6 +78,7 @@ int main (int argc, char *argv[]) {
 	("x, xdrop", "SeqAn X-Drop", 		cxxopts::value<int>()->default_value("7"))
 	("e, error", "Error Rate", 			cxxopts::value<double>()->default_value("0.15"))
 	("estimate", "Estimate Error Rate from Data", 			cxxopts::value<bool>()->default_value("false"))
+	("c, chunks", "Size of Chunks for Reference Genome", 			cxxopts::value<int>()->default_value("100000"))
 	("skip-alignment", "Overlap Only", 	cxxopts::value<bool>()->default_value("false"))
 	("m, memory", "Total RAM of the System in MB", 			cxxopts::value<int>()->default_value("8000"))
 	("score-deviation", "Deviation from the Mean Alignment Score [0,1]", 	cxxopts::value<double>()->default_value("0.1"))
@@ -140,6 +141,7 @@ int main (int argc, char *argv[]) {
 	bpars.kmerSize 	= result["kmer"].as<int>();
 	bpars.xDrop 	= result["xdrop"].as<int>();
 	bpars.errorRate = result["error"].as<double>();
+	bpars.chunkSize = result["chunks"].as<int>();
 
 	bpars.estimateErr 	= result["estimate"].as<bool>();
 	bpars.skipAlignment = result["skip-alignment"].as<bool>();
@@ -204,6 +206,9 @@ int main (int argc, char *argv[]) {
 
     std::string GPUs = "DISABLED";
     printLog(GPUs);
+
+	std::string ChunkSize = std::to_string(bpars.chunkSize);
+	printLog(ChunkSize);
 
 	std::string UserDefinedMemory = std::to_string(bpars.totalMemory) + " MB";
 	printLog(UserDefinedMemory);
@@ -336,7 +341,9 @@ int main (int argc, char *argv[]) {
 
 	unsigned int numReads = 0; // numReads needs to be global (not just per file)
 
-	for(auto itr=allfiles.begin(); itr!=allfiles.end(); itr++)
+	assert(allfiles.size() >= 2);
+
+	for(auto itr=allfiles.begin(); itr!=allfiles.end()-1; itr++)
 	{
 		ParallelFASTQ *pfq = new ParallelFASTQ();
 		pfq->open(itr->filename, false, itr->filesize);
