@@ -490,8 +490,8 @@ int main (int argc, char *argv[]) {
 	while(fillstatus)
 	{
 		fillstatus = pfq->fill_block(nametags, seqs, quals, upperlimit);
-		unsigned int ref_read_len = pfq->get_max_read_len();
-		unsigned int nChunks = ref_read_len / bpars.chunkSize;
+		double ref_read_len = pfq->get_max_read_len();
+		unsigned int nChunks = ceil(ref_read_len / bpars.chunkSize);
 		std::vector<std::string> refseqs;
 		for (unsigned int i = 0; i < nChunks; ++i)
 		{
