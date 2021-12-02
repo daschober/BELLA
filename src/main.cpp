@@ -193,6 +193,7 @@ int main (int argc, char *argv[]) {
 
 	// vector<tuple<unsigned int, unsigned int, unsigned short int>> occurrences;	// 32 bit, 32 bit, 16 bit (read, kmer, position)
 	vector<tuple<KMERINDEX, KMERINDEX, unsigned short int>> transtuples;	// 32 bit, 32 bit, 16 bit (kmer, read, position)
+	vector<tuple<KMERINDEX, KMERINDEX, unsigned short int>> referencetuples; //32 bit, 32 bit, 16 bit (kmer, chunk, postion)
 
 	// ================== //
 	// Parameters Summary //
@@ -470,6 +471,133 @@ int main (int argc, char *argv[]) {
 	printLog(fastqParsingTime);
 	printLog(numReads);
 
+	// ======================== //
+	// Reference Genome Parsing //
+	// ======================== //
+
+	double ref_parsing = omp_get_wtime();
+
+	vector<vector<tuple<KMERINDEX, KMERINDEX, unsigned short int>>> allreferencetuples(MAXTHREADS);
+
+	auto itr = allfiles.end()-1;
+
+	unsigned int numChunks = 0;
+
+	ParallelFASTQ *pfq = new ParallelFASTQ();
+	pfq->open(itr->filename, false, itr->filesize);
+
+	unsigned int fillstatus = 1;
+	while(fillstatus)
+	{
+		fillstatus = pfq->fill_block(nametags, seqs, quals, upperlimit);
+		unsigned int ref_read_len = pfq->get_max_read_len();
+		unsigned int nChunks = ref_read_len / bpars.chunkSize;
+		std::vector<std::string> refseqs;
+		for (unsigned int i = 0; i < nChunks; ++i)
+		{
+			if ((i + 1) * bpars.chunkSize < ref_read_len)
+			{
+				refseqs.push_back(seqs[0].substr(i * bpars.chunkSize, bpars.chunkSize));
+			}
+			else
+			{
+				refseqs.push_back(seqs[0].substr(i * bpars.chunkSize, (i+1)*bpars.chunkSize - ref_read_len));
+				break;
+			}
+		}
+
+#pragma omp parallel for
+		for(int i=0; i<nChunks; i++) 
+		{
+			// remember that the last valid position is length()-1
+			int len = refseqs[i].length();
+
+			if(bpars.useMinimizer)
+			{
+				vector<Kmer> seqkmers;
+				std::vector< int > seqminimizers;    // <position_in_read>
+				for(int j = 0; j <= len - bpars.kmerSize; j++)   // AB: optimize this sliding-window parsing ala HipMer
+				{
+					std::string kmerstrfromfastq = refseqs[i].substr(j, bpars.kmerSize);
+					Kmer mykmer(kmerstrfromfastq.c_str(), kmerstrfromfastq.length());
+					seqkmers.emplace_back(mykmer);
+				}
+
+				getMinimizers(bpars.windowLen, seqkmers, seqminimizers);
+
+				for(auto minpos: seqminimizers)
+				{
+					std::string strminkmer = refseqs[i].substr(minpos, bpars.kmerSize);
+					Kmer myminkmer(strminkmer.c_str(), strminkmer.length());
+					
+					myminkmer = myminkmer.rep();
+					
+					KMERINDEX idx; // kmer_id
+					auto found = countsreliable.find(myminkmer,idx);
+					if(found)
+					{
+						allreferencetuples[MYTHREAD].emplace_back(std::make_tuple(idx, numChunks+i, minpos));
+					}
+				}
+			}
+			else
+			{
+				for(int j = 0; j <= len - bpars.kmerSize; j++)
+				{
+					std::string kmerstrfromfastq = refseqs[i].substr(j, bpars.kmerSize);
+					Kmer mykmer(kmerstrfromfastq.c_str(), kmerstrfromfastq.length());
+					// remember to use only ::rep() when building kmerdict as well
+					Kmer lexsmall;
+					if (bpars.useHOPC)
+					{
+						lexsmall = mykmer.hopc();
+					}
+					else
+					{
+						// remember to use only ::rep() when building kmerdict as well
+						lexsmall = mykmer.rep();
+					}
+
+					KMERINDEX idx; // kmer_id
+					auto found = countsreliable.find(lexsmall,idx);
+					if(found)
+					{
+						//alloccurrences[MYTHREAD].emplace_back(std::make_tuple(numReads+i, idx, j)); // vector<tuple<numReads,kmer_id,kmerpos>>
+						allreferencetuples[MYTHREAD].emplace_back(std::make_tuple(idx, numChunks+i, j)); // transtuples.push_back(col_id,row_id,kmerpos)
+					}
+				}
+			}
+		} // for(int i=0; i<nreads; i++)
+		numChunks += nChunks;
+	} //while(fillstatus) 
+	delete pfq;
+
+	KMERINDEX reftuplecount = 0;
+
+	for(int t=0; t<MAXTHREADS; ++t)
+	{
+		reftuplecount += allreferencetuples[t].size();
+	}
+
+	referencetuples.resize(reftuplecount);
+
+
+	unsigned int reftuplesofar = 0;
+
+	for(int t=0; t<MAXTHREADS; ++t)
+	{
+		//copy(alloccurrences[t].begin(), alloccurrences[t].end(), occurrences.begin() + tuplesofar);
+		copy(allreferencetuples[t].begin(), allreferencetuples[t].end(), referencetuples.begin() + reftuplesofar);
+		reftuplesofar += allreferencetuples[t].size();
+	}
+
+	std::vector<string>().swap(seqs);		// free memory of seqs  
+	std::vector<string>().swap(quals);		// free memory of quals
+
+	std::string ReferenceParsingTime = std::to_string(omp_get_wtime() - ref_parsing) + " seconds";
+	printLog(ReferenceParsingTime);
+	printLog(numChunks);
+
 	// ====================== //
 	// Sparse Matrix Creation //
 	// ====================== //
@@ -497,6 +625,17 @@ int main (int argc, char *argv[]) {
 	std::string ReTransposeTime = std::to_string(omp_get_wtime() - transbeg) + " seconds";
 	printLog(ReTransposeTime);
 
+	double createrefmat = omp_get_wtime();
+
+	CSC<KMERINDEX, unsigned short int> refmat(referencetuples, nkmer, numChunks,
+							[](unsigned short int& p1, unsigned short int& p2)
+							{
+								return p1;
+							}, false);
+	std::vector<tuple<KMERINDEX, KMERINDEX, unsigned short int>>().swap(referencetuples);
+
+	std::string RefMatTime = std::to_string(omp_get_wtime() - createrefmat) + " seconds";
+	printLog(RefMatTime);
 
 	// ==================================================== //
 	// Sparse Matrix Multiplication (aka Overlap Detection) //
@@ -504,7 +643,7 @@ int main (int argc, char *argv[]) {
 		
 	spmatPtr_ getvaluetype(make_shared<spmatType_>());
 	HashSpGEMM(
-		spmat, transpmat, 
+		spmat, refmat, 
 		// n-th k-mer positions on read i and on read j
 	    [&bpars, &reads] (const unsigned short int& begpH, const unsigned short int& begpV, 
 	        const unsigned int& id1, const unsigned int& id2)
