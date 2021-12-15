@@ -268,8 +268,6 @@ int main (int argc, char *argv[]) {
 #endif
 
 	double all;
-	unsigned int k = 16;
-	printLog(k);
 
 	// ================ //
 	//  Reliable Bound  //
@@ -498,17 +496,13 @@ int main (int argc, char *argv[]) {
 
 		unsigned int numRefReads = seqs.size();
 		unsigned int nChunks = 0;
-		unsigned int womp = 5;
-		printLog(womp);
 
 		for(unsigned int k = 0; k < numRefReads; ++k){
 
 			double seq_read_len = seqs[k].length();
-			printLog(seq_read_len);
 
 
 			unsigned int numbChunksPerSeq = seq_read_len/bpars.chunkSize;
-			printLog(numbChunksPerSeq);
 
 			for (unsigned int i = 0; i < numbChunksPerSeq; ++i)
 			{
