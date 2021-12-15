@@ -268,6 +268,8 @@ int main (int argc, char *argv[]) {
 #endif
 
 	double all;
+	unsigned int k = 16;
+	printLog(k);
 
 	// ================ //
 	//  Reliable Bound  //
@@ -485,25 +487,38 @@ int main (int argc, char *argv[]) {
 
 	ParallelFASTQ *pfq = new ParallelFASTQ();
 	pfq->open(itr->filename, false, itr->filesize);
+	unsigned int bock = 16;
+	
 
 	unsigned int fillstatus = 1;
 	while(fillstatus)
 	{
 		fillstatus = pfq->fill_block(nametags, seqs, quals, upperlimit);
-		double ref_read_len = pfq->get_max_read_len();
-		unsigned int nChunks = ceil(ref_read_len / bpars.chunkSize);
 		std::vector<std::string> refseqs;
-		for (unsigned int i = 0; i < nChunks; ++i)
-		{
-			if ((i + 1) * bpars.chunkSize < ref_read_len)
+
+		unsigned int numRefReads = seqs.size();
+		unsigned int nChunks = 0;
+		unsigned int womp = 5;
+		printLog(womp);
+
+		for(unsigned int k = 0; k < numRefReads; ++k){
+
+			double seq_read_len = seqs[k].length();
+			printLog(seq_read_len);
+
+
+			unsigned int numbChunksPerSeq = seq_read_len/bpars.chunkSize;
+			printLog(numbChunksPerSeq);
+
+			for (unsigned int i = 0; i < numbChunksPerSeq; ++i)
 			{
-				refseqs.push_back(seqs[0].substr(i * bpars.chunkSize, bpars.chunkSize));
+				refseqs.push_back(seqs[k].substr(i * bpars.chunkSize, bpars.chunkSize));
+				nChunks++;		
 			}
-			else
-			{
-				refseqs.push_back(seqs[0].substr(i * bpars.chunkSize, (i+1)*bpars.chunkSize - ref_read_len));
-				break;
-			}
+
+			refseqs.push_back(seqs[k].substr(numbChunksPerSeq * bpars.chunkSize, seq_read_len - (numbChunksPerSeq * bpars.chunkSize)));
+			nChunks++;
+				
 		}
 
 #pragma omp parallel for
@@ -536,7 +551,7 @@ int main (int argc, char *argv[]) {
 					auto found = countsreliable.find(myminkmer,idx);
 					if(found)
 					{
-						allreferencetuples[MYTHREAD].emplace_back(std::make_tuple(idx, numChunks+i, minpos));
+						allreferencetuples[MYTHREAD].emplace_back(std::make_tuple(idx,numChunks + i, minpos));
 					}
 				}
 			}
@@ -563,7 +578,7 @@ int main (int argc, char *argv[]) {
 					if(found)
 					{
 						//alloccurrences[MYTHREAD].emplace_back(std::make_tuple(numReads+i, idx, j)); // vector<tuple<numReads,kmer_id,kmerpos>>
-						allreferencetuples[MYTHREAD].emplace_back(std::make_tuple(idx, numChunks+i, j)); // transtuples.push_back(col_id,row_id,kmerpos)
+						allreferencetuples[MYTHREAD].emplace_back(std::make_tuple(idx, numChunks + i, j)); // transtuples.push_back(col_id,row_id,kmerpos)
 					}
 				}
 			}
@@ -597,6 +612,7 @@ int main (int argc, char *argv[]) {
 	std::string ReferenceParsingTime = std::to_string(omp_get_wtime() - ref_parsing) + " seconds";
 	printLog(ReferenceParsingTime);
 	printLog(numChunks);
+	printLog(bock);
 
 	// ====================== //
 	// Sparse Matrix Creation //
