@@ -117,9 +117,15 @@ struct SortBy:std::binary_function<unsigned short int, unsigned short int, bool>
 	const std::vector<unsigned short int>& vec;
 };
 
+// GGGG: this is the SpMat David Schober should use for now when working on reference genome using SpMat (simpler type, we can go back to the more compelx one later)
+struct spmatRefType_ {
+	unsigned short int count = 0; // number of shared k-mers
+	std::vector<pair<unsigned short int, unsigned short int>> pos; // std::vector of k-mer positions <read-i, read-j> (use at most 2 kmers)
+};
+
+// GGGG: BELLA's default type
 struct spmatType_ {
 
-// <<<<<<< HEAD
 	unsigned short int count = 0;		// number of shared k-mers
 	std::vector<std::vector<pair<unsigned short int, unsigned short int>>> pos;	// std::vector of k-mer positions <read-i, read-j> (if !K, use at most 2 kmers, otherwise all) per bin
 	std::vector<unsigned short int> support;	// number of k-mers supporting a given overlap
@@ -127,20 +133,23 @@ struct spmatType_ {
 	std::vector<unsigned short int> ids;		// indices corresponded to sorting of support
 
 	//	GG: sort according to support number
-	void sort() {
+	void sort()
+	{
 		ids = std::vector<unsigned short int>(support.size());					// number of support
 		std::iota(ids.begin(), ids.end(), 0);				// assign an id
 		std::sort(ids.begin(), ids.end(), SortBy(support));	// sort support by supporting k-mers
 	}
 
 	//	GG: print overlap estimate and support number
-	void print() {
+	void print()
+	{
 		std::copy(overlap.begin(), overlap.end(), std::ostream_iterator<unsigned short int>(std::cout, "\t")); std::cout << std::endl;
 		std::copy(support.begin(), support.end(), std::ostream_iterator<unsigned short int>(std::cout, "\t")); std::cout << std::endl;
 	}
 
 	//	GG: number of kmer supporting the most voted bin
-	int chain() {
+	int chain()
+	{
 		ids = std::vector<unsigned short int>(support.size());	// number of support
 		std::iota(ids.begin(), ids.end(), 0);				// assign an id
 		std::sort(ids.begin(), ids.end(), SortBy(support));	// sort support by supporting k-mers
@@ -150,7 +159,8 @@ struct spmatType_ {
 	}
 
 	//	GG: overlap len in the most voted bin
-	int overlaplength() {
+	int overlaplength()
+	{
 		ids = std::vector<unsigned short int>(support.size());	// number of support
 		std::iota(ids.begin(), ids.end(), 0);				// assign an id
 		std::sort(ids.begin(), ids.end(), SortBy(support));	// sort support by supporting k-mers
@@ -160,7 +170,8 @@ struct spmatType_ {
 	}
 
 	//	GG: choose does also sorting and return the position of the first k-mer in each bin
-	pair<unsigned short int, unsigned short int> choose() {
+	pair<unsigned short int, unsigned short int> choose() 
+	{
 		ids = std::vector<unsigned short int>(support.size());	// number of support
 		std::iota(ids.begin(), ids.end(), 0);				// assign an id
 		std::sort(ids.begin(), ids.end(), SortBy(support));	// sort support by supporting k-mers
@@ -169,21 +180,16 @@ struct spmatType_ {
 		pos[ids[0]].resize(1);	// GG: same for the number of kmers in the choosen bin, we need only one
 
 		return pos[ids[0]][0];	// GG: returning choosen seed // It might be better choose the kmer randomly and find an x-drop/binsize ratio to justify
-// ======= // HOPC
-	// int count = 0;              // number of shared k-mers
-	// vector<vector<pair<pair<int,bool>,pair<int,bool>>>> pos;  // vector of k-mer positions <read-i, read-j> (if !K, use at most 2 kmers, otherwise all)
-	// vector<int> support;	        // supports of the k-mer overlaps above
-	// vector<int> overlap; 	// to avoid recomputing overlap
-	// vector<int> sorted_idx; // indices cooresponded to sorting of support
 
-	// void sort() {
-	// 	sorted_idx = vector<int>(support.size());
-	// 	std::iota(sorted_idx.begin(), sorted_idx.end(), 0);
-	// 	std::sort(sorted_idx.begin(), sorted_idx.end(), SortBy(support));
 	}
 };
 
-typedef shared_ptr<spmatType_> spmatPtr_; // pointer to spmatType_ datastruct
+// GGGG: BELLA's default type
+// typedef shared_ptr<spmatType_> spmatPtr_; // pointer to spmatType_ datastruct
+
+// GGGG: David's type
+typedef shared_ptr<spmatRefType_> spmatPtr_; // pointer to spmatType_ datastruct
+
 typedef std::vector<Kmer> Kmers;
 
 struct alignmentInfo {

@@ -650,31 +650,44 @@ int main (int argc, char *argv[]) {
 	// Sparse Matrix Multiplication (aka Overlap Detection) //
 	// ==================================================== //
 		
-	spmatPtr_ getvaluetype(make_shared<spmatType_>());
+	spmatPtr_ getvaluetype(make_shared<spmatRefType_>());
 	HashSpGEMM(
 		spmat, refmat, 
 		// n-th k-mer positions on read i and on read j
 	    [&bpars, &reads] (const unsigned short int& begpH, const unsigned short int& begpV, 
 	        const unsigned int& id1, const unsigned int& id2)
 		{
-			spmatPtr_ value(make_shared<spmatType_>());
+			spmatPtr_ value(make_shared<spmatRefType_>()); // this is now just count and a vec of pair position
 
-			std::string& read1 = reads[id1].seq;
-			std::string& read2 = reads[id2].seq;
+			// GGGG: Code using David's types
+			value->count = 1;
+
+			pair<unsigned short int, unsigned short int> mypair = std::make_pair(begpH, begpV); 
+			value->pos.push_back(mypair);
+
+			/* GGGG: BELLA's default code
+			// std::string& read1 = reads[id1].seq;
+			// std::string& read2 = reads[id2].seq;
 
 			// GG: function in chain.h
-			multiop(value, read1, read2, begpH, begpV, bpars.kmerSize);
+			// multiop(value, read1, read2, begpH, begpV, bpars.kmerSize);
+			*/
+
 			return value;
 		},
-	    [&bpars, &reads] (spmatPtr_& m1, spmatPtr_& m2, const unsigned int& id1, 
-	        const unsigned int& id2)
+	    [&bpars, &reads] (spmatPtr_& m1, spmatPtr_& m2)
 		{
+			// GGGG: Code using David's types
+			m1->count = m1->count + m2->count;
+			m1->pos.insert(m1->pos.end(), m2->pos.begin(), m2->pos.end());
+
+			/* GGGG: BELLA's default code
 			// GG: after testing correctness, these variables can be removed
-			std::string& readname1 = reads[id1].nametag;
-			std::string& readname2 = reads[id2].nametag;
 
 			// GG: function in chain.h
-			chainop(m1, m2, bpars, readname1, readname2);
+			// chainop(m1, m2, bpars);
+			*/
+
 			return m1;
 		},
 	    reads, getvaluetype, OutputFile, bpars, ratiophi);

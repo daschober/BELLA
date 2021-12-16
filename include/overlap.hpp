@@ -323,7 +323,7 @@ void LocalSpGEMM(IT & start, IT & end, const CSC<IT,NT> & A, const CSC<IT,NT> & 
 				{
 					if (globalHashVec[hash].first == key) //key is found in hash table
 					{	//	GG: addop temporary modify, remalnlene key, i after testing
-						globalHashVec[hash].second = addop(result, globalHashVec[hash].second, key, i);
+						globalHashVec[hash].second = addop(result, globalHashVec[hash].second); //, key, i);
 						break;
 					}
 					else if (globalHashVec[hash].first == -1) //key is not registered yet
@@ -416,7 +416,7 @@ void PostAlignDecision(const seqAnResult& maxExtScore,
 #endif
 	const readType_& read1, const readType_& read2, 
 			const BELLApars& bpars, double ratiophi, int count, stringstream& myBatch, size_t& outputted,
-					size_t& numBasesAlignedTrue, size_t& numBasesAlignedFalse, bool& passed, int const& matches)
+					size_t& numBasesAlignedTrue, size_t& numBasesAlignedFalse, bool& passed) //, int const& matches)
 {
 	auto maxseed = maxExtScore.seed;	// returns a seqan:Seed object
 
@@ -554,10 +554,10 @@ auto RunPairWiseAlignments(IT start, IT end, IT offset, IT * colptrC, IT * rowid
 				bool passed = false;
 
 				//	GG: number of matching kmer into the majority voted bin
-				unsigned short int matches = val->chain();
+				// unsigned short int matches = val->chain();
 				unsigned short int overlap;
 
-				pair<int, int> kmer = val->choose();
+				pair<int, int> kmer = val->pos[0];	// GGGG: @David it's using the first common k-mer you might wanna do something smarter here
 				int i = kmer.first, j = kmer.second;
 
 				//	GG: nucleotide alignment
@@ -568,7 +568,7 @@ auto RunPairWiseAlignments(IT start, IT end, IT offset, IT * colptrC, IT * rowid
 			#endif
 
 				PostAlignDecision(maxExtScore, reads[rid], reads[cid], bpars, ratiophi, val->count, vss[ithread], 
-					outputted, numBasesAlignedTrue, numBasesAlignedFalse, passed, matches);
+					outputted, numBasesAlignedTrue, numBasesAlignedFalse, passed); //, matches);
 			#ifdef __SIMD__
 				numBasesAlignedThread += getEndPositionV(maxExtScore.seed)-getBeginPositionV(maxExtScore.seed);
 			#else
@@ -577,7 +577,8 @@ auto RunPairWiseAlignments(IT start, IT end, IT offset, IT * colptrC, IT * rowid
 			}
 			else // if skipAlignment == false do alignment, else save just some info on the pair to file
 			{
-				pair<int, int> kmer = val->choose();
+				// pair<int, int> kmer = val->choose();
+				pair<int, int> kmer = val->pos[0];	// GGGG: @David it's using the first common k-mer you might wanna do something smarter here
 				int i = kmer.first, j = kmer.second;
 
 				int overlap = overlapop(reads[rid].seq, reads[cid].seq, i, j, bpars.kmerSize);
@@ -908,7 +909,7 @@ RunPairWiseAlignmentsGPU(IT start, IT end, IT offset, IT * colptrC, IT * rowids,
 				loganResult localRes;
 
 				//	GG: number of matching kmer into the majority voted bin
-				unsigned short int matches = val->chain();
+				// unsigned short int matches = val->chain();
 
 				pair<int, int> kmer = val->choose();
 				int i = kmer.first, j = kmer.second;
