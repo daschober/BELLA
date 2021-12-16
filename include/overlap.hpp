@@ -683,7 +683,7 @@ void HashSpGEMM(const CSC<IT,NT>& A, const CSC<IT,NT>& B, MultiplyOperation mult
 	int stages = std::ceil((double) required_memory/ free_memory); 	// form output in stages 
 	uint64_t nnzcperstage = free_memory / (safety_net * (sizeof(FT)+sizeof(IT)));
 
-	std::cout << nnzc << std::endl;
+	//std::cout << nnzc << std::endl;
 
 	std::string nnzOutput  = std::to_string(nnzc);
 	std::string FreeMemory = std::to_string(free_memory) + " MB";

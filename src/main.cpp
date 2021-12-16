@@ -485,7 +485,6 @@ int main (int argc, char *argv[]) {
 
 	ParallelFASTQ *pfq = new ParallelFASTQ();
 	pfq->open(itr->filename, false, itr->filesize);
-	unsigned int bock = 16;
 	
 
 	unsigned int fillstatus = 1;
@@ -606,7 +605,6 @@ int main (int argc, char *argv[]) {
 	std::string ReferenceParsingTime = std::to_string(omp_get_wtime() - ref_parsing) + " seconds";
 	printLog(ReferenceParsingTime);
 	printLog(numChunks);
-	printLog(bock);
 
 	// ====================== //
 	// Sparse Matrix Creation //
@@ -615,7 +613,8 @@ int main (int argc, char *argv[]) {
 	unsigned int nkmer = countsreliable.size();
 	
 	// to help the parsing script
-    cout << nkmer << endl;
+    //cout << nkmer << endl;
+	printLog(nkmer);
 	
 	double matcreat = omp_get_wtime();
 	CSC<KMERINDEX, unsigned short int> transpmat(transtuples, nkmer, numReads,
