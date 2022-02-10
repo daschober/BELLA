@@ -164,8 +164,7 @@ xavierResult xavierAlign(const std::string& row, const std::string& col, int row
 	ScoringSchemeX scoringScheme(match, mismatch, gap);	// enalties (LOGAN currently supports only linear gap penalty and penalty within +/- 3)
 
 	SeedX seed(i, j, kmerSize);
-
-	std::string seedH = row.substr(getBeginPositionH(seed), kmerSize);
+	std::string seedH = row.substr(getBeginPositionH(seed), kmerSize); 
 	std::string seedV = col.substr(getBeginPositionV(seed), kmerSize);
 
 	std::string rep = reversecomplement(seedH);

@@ -323,7 +323,7 @@ void LocalSpGEMM(IT & start, IT & end, const CSC<IT,NT> & A, const CSC<IT,NT> & 
 				{
 					if (globalHashVec[hash].first == key) //key is found in hash table
 					{	//	GG: addop temporary modify, remalnlene key, i after testing
-						globalHashVec[hash].second = addop(result, globalHashVec[hash].second, key, i);
+						globalHashVec[hash].second = addop(result, globalHashVec[hash].second); //, key, i);
 						break;
 					}
 					else if (globalHashVec[hash].first == -1) //key is not registered yet
@@ -416,7 +416,7 @@ void PostAlignDecision(const seqAnResult& maxExtScore,
 #endif
 	const readType_& read1, const readType_& read2, 
 			const BELLApars& bpars, double ratiophi, int count, stringstream& myBatch, size_t& outputted,
-					size_t& numBasesAlignedTrue, size_t& numBasesAlignedFalse, bool& passed, int const& matches)
+					size_t& numBasesAlignedTrue, size_t& numBasesAlignedFalse, bool& passed) //, int const& matches)
 {
 	auto maxseed = maxExtScore.seed;	// returns a seqan:Seed object
 
@@ -497,7 +497,7 @@ void PostAlignDecision(const seqAnResult& maxExtScore,
 }
 
 template <typename IT, typename FT>
-auto RunPairWiseAlignments(IT start, IT end, IT offset, IT * colptrC, IT * rowids, FT * values, const readVector_& reads, 
+auto RunPairWiseAlignments(IT start, IT end, IT offset, IT * colptrC, IT * rowids, FT * values, const readVector_& reads, const readVector_& refreads,
 	char* filename, const BELLApars& bpars, const double& ratiophi)
 {
 	size_t alignedpairs = 0;
@@ -514,8 +514,7 @@ auto RunPairWiseAlignments(IT start, IT end, IT offset, IT * colptrC, IT * rowid
 	}
 
 	vector<stringstream> vss(numThreads); // any chance of false sharing here? depends on how stringstream is implemented. optimize later if needed...
-
-#pragma omp parallel for schedule(dynamic)
+//#pragma omp parallel for schedule(dynamic)
 	for(IT j = start; j < end; ++j)	// for (end-start) columns of A^T A (one block)
 	{
 		size_t numAlignmentsThread		= 0;
@@ -527,18 +526,14 @@ auto RunPairWiseAlignments(IT start, IT end, IT offset, IT * colptrC, IT * rowid
 		size_t outputted = 0;
 
 		int ithread = omp_get_thread_num();
-
 		for (IT i = colptrC[j]; i < colptrC[j+1]; ++i)  // all nonzeros in that column of A^T A
 		{
 			unsigned int rid = rowids[i-offset];	// row id
 			unsigned int cid = j;					// column id
-
 			const string& seq1 = reads[rid].seq;	// get reference for readibility
-			const string& seq2 = reads[cid].seq;	// get reference for readibility
-
-			unsigned short int seq1len = seq1.length();
-			unsigned short int seq2len = seq2.length();
-
+			const string& seq2 = refreads[cid].seq;	// get reference for readibility
+			unsigned int seq1len = seq1.length();
+			unsigned int seq2len = seq2.length();
 			spmatPtr_ val = values[i-offset];
 
 			if(!bpars.skipAlignment) // fix -z to not print 
@@ -554,12 +549,10 @@ auto RunPairWiseAlignments(IT start, IT end, IT offset, IT * colptrC, IT * rowid
 				bool passed = false;
 
 				//	GG: number of matching kmer into the majority voted bin
-				unsigned short int matches = val->chain();
+				// unsigned short int matches = val->chain();
 				unsigned short int overlap;
-
-				pair<int, int> kmer = val->choose();
+				pair<int, int> kmer = val->pos[0];	// GGGG: @David it's using the first common k-mer you might wanna do something smarter here
 				int i = kmer.first, j = kmer.second;
-
 				//	GG: nucleotide alignment
 			#ifdef __SIMD__
 				maxExtScore = xavierAlign(seq1, seq2, seq1len, i, j, bpars.xDrop, bpars.kmerSize);
@@ -568,7 +561,7 @@ auto RunPairWiseAlignments(IT start, IT end, IT offset, IT * colptrC, IT * rowid
 			#endif
 
 				PostAlignDecision(maxExtScore, reads[rid], reads[cid], bpars, ratiophi, val->count, vss[ithread], 
-					outputted, numBasesAlignedTrue, numBasesAlignedFalse, passed, matches);
+					outputted, numBasesAlignedTrue, numBasesAlignedFalse, passed); //, matches);
 			#ifdef __SIMD__
 				numBasesAlignedThread += getEndPositionV(maxExtScore.seed)-getBeginPositionV(maxExtScore.seed);
 			#else
@@ -577,11 +570,12 @@ auto RunPairWiseAlignments(IT start, IT end, IT offset, IT * colptrC, IT * rowid
 			}
 			else // if skipAlignment == false do alignment, else save just some info on the pair to file
 			{
-				pair<int, int> kmer = val->choose();
+				// pair<int, int> kmer = val->choose();
+				pair<int, int> kmer = val->pos[0];	// GGGG: @David it's using the first common k-mer you might wanna do something smarter here
 				int i = kmer.first, j = kmer.second;
 
-				int overlap = overlapop(reads[rid].seq, reads[cid].seq, i, j, bpars.kmerSize);
-				vss[ithread] << reads[cid].nametag << '\t' << reads[rid].nametag << '\t' << val->count << '\t' <<
+				int overlap = overlapop(reads[rid].seq, refreads[cid].seq, i, j, bpars.kmerSize);
+				vss[ithread] << refreads[cid].nametag << '\t' << reads[rid].nametag << '\t' << val->count << '\t' <<
 						overlap << '\t' << seq2len << '\t' << seq1len << endl;
 				++outputted;
 				// vss[ithread] << reads[cid].nametag << '\t' << reads[rid].nametag << '\t' << val->count << '\t' << 
@@ -599,7 +593,6 @@ auto RunPairWiseAlignments(IT start, IT end, IT offset, IT * colptrC, IT * rowid
 			totfailbases += numBasesAlignedFalse;
 		}
 	} // all columns from start...end (omp for loop)
-
 	double outputting = omp_get_wtime();
 
 	int64_t* bytes = new int64_t[numThreads];
@@ -648,7 +641,7 @@ auto RunPairWiseAlignments(IT start, IT end, IT offset, IT * colptrC, IT * rowid
   * Sparse multithreaded GEMM.
  **/
 template <typename IT, typename NT, typename FT, typename MultiplyOperation, typename AddOperation>
-void HashSpGEMM(const CSC<IT,NT>& A, const CSC<IT,NT>& B, MultiplyOperation multop, AddOperation addop, const readVector_& reads, 
+void HashSpGEMM(const CSC<IT,NT>& A, const CSC<IT,NT>& B, MultiplyOperation multop, AddOperation addop, const readVector_& reads, const readVector_& refreads,
 	FT& getvaluetype, char* filename, const BELLApars& bpars, const double& ratiophi)
 {
 	double free_memory = estimateMemory(bpars);
@@ -683,7 +676,7 @@ void HashSpGEMM(const CSC<IT,NT>& A, const CSC<IT,NT>& B, MultiplyOperation mult
 	int stages = std::ceil((double) required_memory/ free_memory); 	// form output in stages 
 	uint64_t nnzcperstage = free_memory / (safety_net * (sizeof(FT)+sizeof(IT)));
 
-	std::cout << nnzc << std::endl;
+	//std::cout << nnzc << std::endl;
 
 	std::string nnzOutput  = std::to_string(nnzc);
 	std::string FreeMemory = std::to_string(free_memory) + " MB";
@@ -731,7 +724,6 @@ void HashSpGEMM(const CSC<IT,NT>& A, const CSC<IT,NT>& B, MultiplyOperation mult
 
 		IT * rowids = new IT[endnz-begnz];
 		FT * values = new FT[endnz-begnz];
-
 		for(IT i=colStart[b]; i<colStart[b+1]; ++i) // combine step
 		{
 			IT loccol = i-colStart[b];
@@ -739,13 +731,12 @@ void HashSpGEMM(const CSC<IT,NT>& A, const CSC<IT,NT>& B, MultiplyOperation mult
 			copy(RowIdsofC[loccol].begin(), RowIdsofC[loccol].end(), rowids + locnz);
 			copy(ValuesofC[loccol].begin(), ValuesofC[loccol].end(), values + locnz);
 		}
-
 		delete [] RowIdsofC;
 		delete [] ValuesofC;
 
 		// GG: all paralelism moved to GPU we can do better
 		tuple<size_t, size_t, size_t, size_t, size_t, size_t, double> alignstats; // (alignedpairs, alignedbases, totalreadlen, outputted, alignedtrue, alignedfalse, timeoutputt)
-		alignstats = RunPairWiseAlignments(colStart[b], colStart[b+1], begnz, colptrC, rowids, values, reads, filename, bpars, ratiophi);
+		alignstats = RunPairWiseAlignments(colStart[b], colStart[b+1], begnz, colptrC, rowids, values, reads, refreads, filename, bpars, ratiophi);
 
 		if(!bpars.skipAlignment)
 		{
@@ -758,7 +749,7 @@ void HashSpGEMM(const CSC<IT,NT>& A, const CSC<IT,NT>& B, MultiplyOperation mult
 			std::string AlignmentTime = std::to_string(aligntime) + " seconds";
 			printLog(AlignmentTime);
 
-			std::string AlignmentRate = std::to_string((int)(static_cast<double>(get<1>(alignstats))/aligntime)) + " bases/second";
+			std::string AlignmentRate = std::to_string((unsigned int)(static_cast<double>(get<1>(alignstats))/aligntime)) + " bases/second";
 			printLog(AlignmentRate);
 
 			std::string AverageReadLength = std::to_string((int)(static_cast<double>(get<2>(alignstats))/(2*get<0>(alignstats))));
@@ -769,10 +760,10 @@ void HashSpGEMM(const CSC<IT,NT>& A, const CSC<IT,NT>& B, MultiplyOperation mult
 			
 			// to help the parsing script
 			std::cout << get<3>(alignstats) << std::endl;
-			std::string AverageLengthSuccessfulAlignment = std::to_string((int)(static_cast<double>(get<4>(alignstats))/get<3>(alignstats))) + " bps";
+			std::string AverageLengthSuccessfulAlignment = std::to_string((unsigned int)(static_cast<double>(get<4>(alignstats))/get<3>(alignstats))) + " bps";
 			printLog(AverageLengthSuccessfulAlignment);
 
-			std::string AverageLengthFailedAlignment = std::to_string((int)(static_cast<double>(get<5>(alignstats)) / (get<0>(alignstats) - get<3>(alignstats)))) + " bps";
+			std::string AverageLengthFailedAlignment = std::to_string((unsigned int)(static_cast<double>(get<5>(alignstats)) / (get<0>(alignstats) - get<3>(alignstats)))) + " bps";
 			printLog(AverageLengthFailedAlignment);
 		}
 
@@ -787,6 +778,7 @@ void HashSpGEMM(const CSC<IT,NT>& A, const CSC<IT,NT>& B, MultiplyOperation mult
 	delete [] colptrC;
 	delete [] colStart;
 }
+
 
 #else	// #ifndef __NVCC__
 
@@ -908,7 +900,7 @@ RunPairWiseAlignmentsGPU(IT start, IT end, IT offset, IT * colptrC, IT * rowids,
 				loganResult localRes;
 
 				//	GG: number of matching kmer into the majority voted bin
-				unsigned short int matches = val->chain();
+				// unsigned short int matches = val->chain();
 
 				pair<int, int> kmer = val->choose();
 				int i = kmer.first, j = kmer.second;

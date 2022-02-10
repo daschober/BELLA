@@ -78,6 +78,7 @@ int main (int argc, char *argv[]) {
 	("x, xdrop", "SeqAn X-Drop", 		cxxopts::value<int>()->default_value("7"))
 	("e, error", "Error Rate", 			cxxopts::value<double>()->default_value("0.15"))
 	("estimate", "Estimate Error Rate from Data", 			cxxopts::value<bool>()->default_value("false"))
+	("c, chunks", "Size of Chunks for Reference Genome", 			cxxopts::value<int>()->default_value("100000"))
 	("skip-alignment", "Overlap Only", 	cxxopts::value<bool>()->default_value("false"))
 	("m, memory", "Total RAM of the System in MB", 			cxxopts::value<int>()->default_value("8000"))
 	("score-deviation", "Deviation from the Mean Alignment Score [0,1]", 	cxxopts::value<double>()->default_value("0.1"))
@@ -140,6 +141,7 @@ int main (int argc, char *argv[]) {
 	bpars.kmerSize 	= result["kmer"].as<int>();
 	bpars.xDrop 	= result["xdrop"].as<int>();
 	bpars.errorRate = result["error"].as<double>();
+	bpars.chunkSize = result["chunks"].as<int>();
 
 	bpars.estimateErr 	= result["estimate"].as<bool>();
 	bpars.skipAlignment = result["skip-alignment"].as<bool>();
@@ -187,10 +189,12 @@ int main (int argc, char *argv[]) {
 	vector<string> quals;
 	vector<string> nametags;
 	readVector_ reads;
+	readVector_ refreads;
 	Kmers kmersfromreads;
 
 	// vector<tuple<unsigned int, unsigned int, unsigned short int>> occurrences;	// 32 bit, 32 bit, 16 bit (read, kmer, position)
 	vector<tuple<KMERINDEX, KMERINDEX, unsigned short int>> transtuples;	// 32 bit, 32 bit, 16 bit (kmer, read, position)
+	vector<tuple<KMERINDEX, KMERINDEX, unsigned short int>> referencetuples; //32 bit, 32 bit, 16 bit (kmer, chunk, postion)
 
 	// ================== //
 	// Parameters Summary //
@@ -204,6 +208,9 @@ int main (int argc, char *argv[]) {
 
     std::string GPUs = "DISABLED";
     printLog(GPUs);
+
+	std::string ChunkSize = std::to_string(bpars.chunkSize);
+	printLog(ChunkSize);
 
 	std::string UserDefinedMemory = std::to_string(bpars.totalMemory) + " MB";
 	printLog(UserDefinedMemory);
@@ -277,6 +284,7 @@ int main (int argc, char *argv[]) {
 
 	// GG: reads global
 	vector<readVector_> allreads(MAXTHREADS);
+	vector<readVector_> allrefchunks(MAXTHREADS);
 
 	all = omp_get_wtime();
 
@@ -336,7 +344,9 @@ int main (int argc, char *argv[]) {
 
 	unsigned int numReads = 0; // numReads needs to be global (not just per file)
 
-	for(auto itr=allfiles.begin(); itr!=allfiles.end(); itr++)
+	assert(allfiles.size() >= 2);
+
+	for(auto itr=allfiles.begin(); itr!=allfiles.end()-1; itr++)
 	{
 		ParallelFASTQ *pfq = new ParallelFASTQ();
 		pfq->open(itr->filename, false, itr->filesize);
@@ -458,10 +468,191 @@ int main (int argc, char *argv[]) {
 
 	std::vector<string>().swap(seqs);		// free memory of seqs  
 	std::vector<string>().swap(quals);		// free memory of quals
+	std::vector<string>().swap(nametags);
 
 	std::string fastqParsingTime = std::to_string(omp_get_wtime() - parsefastq) + " seconds";
 	printLog(fastqParsingTime);
 	printLog(numReads);
+
+	// ======================== //
+	// Reference Genome Parsing //
+	// ======================== //
+
+	double ref_parsing = omp_get_wtime();
+
+	vector<vector<tuple<KMERINDEX, KMERINDEX, unsigned short int>>> allreferencetuples(MAXTHREADS);
+
+	auto itr = allfiles.end()-1;
+
+	unsigned int numChunks = 0;
+
+	ParallelFASTQ *pfq = new ParallelFASTQ();
+	pfq->open(itr->filename, false, itr->filesize);
+	
+
+	unsigned int fillstatus = 1;
+	while(fillstatus)
+	{
+		fillstatus = pfq->fill_block(nametags, seqs, quals, upperlimit);
+		std::vector<std::string> chunks;
+		std::vector<std::vector<std::string>> allchunks(MAXTHREADS);
+
+		unsigned int numChromosomes = seqs.size();
+		unsigned int nChunks = 0;
+
+		for(unsigned int k = 0; k < numChromosomes; ++k){
+
+			double chrom_read_len = seqs[k].length();
+			nametags[k].erase(nametags[k].begin());	// removing "@"
+
+			unsigned int numbChunksPerChrom = (chrom_read_len/bpars.chunkSize)+1;
+
+		//#pragma omp parallel for
+			for (unsigned int i = 0; i < numbChunksPerChrom; ++i)
+			{
+				if((i+1) * bpars.chunkSize < chrom_read_len){
+
+					allchunks[MYTHREAD].push_back(seqs[k].substr(i * bpars.chunkSize, bpars.chunkSize));		
+					readType_ temp;
+					temp.nametag = nametags[k] + "_" + std::to_string(i);
+					temp.seq = seqs[k].substr(i * bpars.chunkSize, bpars.chunkSize);    					// save reads for seeded alignment
+					temp.readid = nChunks + i;
+					allrefchunks[MYTHREAD].push_back(temp);
+
+				}
+
+				else{
+					allchunks[MYTHREAD].push_back(seqs[k].substr(i * bpars.chunkSize, chrom_read_len - (i * bpars.chunkSize)));
+					readType_ temp;
+					temp.nametag = nametags[k] + "_" + std::to_string(i);
+					temp.seq = seqs[k].substr(i * bpars.chunkSize, chrom_read_len - (i * bpars.chunkSize));    					// save reads for seeded alignment
+					temp.readid = nChunks + i;
+					allrefchunks[MYTHREAD].push_back(temp);
+				}
+				
+			}
+			nChunks += numbChunksPerChrom;
+			
+		}
+
+
+		KMERINDEX refchunkscount = 0;
+		for(int t=0; t<MAXTHREADS; ++t)
+		{
+			refchunkscount += allchunks[t].size();
+		}
+
+		chunks.resize(refchunkscount);
+		
+		unsigned int refseqssofar = 0;
+		for(int t=0; t<MAXTHREADS; ++t)
+		{
+			copy(allchunks[t].begin(), allchunks[t].end(), chunks.begin() + refseqssofar);
+			refseqssofar += allchunks[t].size();
+		}
+
+	#pragma omp parallel for
+		for(int i=0; i<nChunks; i++) 
+		{
+			// remember that the last valid position is length()-1
+			int len = chunks[i].length();
+
+			if(bpars.useMinimizer)
+			{
+				vector<Kmer> seqkmers;
+				std::vector< int > seqminimizers;    // <position_in_read>
+				for(int j = 0; j <= len - bpars.kmerSize; j++)   // AB: optimize this sliding-window parsing ala HipMer
+				{
+					std::string kmerstrfromfastq = chunks[i].substr(j, bpars.kmerSize);
+					Kmer mykmer(kmerstrfromfastq.c_str(), kmerstrfromfastq.length());
+					seqkmers.emplace_back(mykmer);
+				}
+
+				getMinimizers(bpars.windowLen, seqkmers, seqminimizers);
+
+				for(auto minpos: seqminimizers)
+				{
+					std::string strminkmer = chunks[i].substr(minpos, bpars.kmerSize);
+					Kmer myminkmer(strminkmer.c_str(), strminkmer.length());
+					
+					myminkmer = myminkmer.rep();
+					
+					KMERINDEX idx; // kmer_id
+					auto found = countsreliable.find(myminkmer,idx);
+					if(found)
+					{
+						allreferencetuples[MYTHREAD].emplace_back(std::make_tuple(idx,numChunks + i, minpos));
+					}
+				}
+			}
+			else
+			{
+				for(int j = 0; j <= len - bpars.kmerSize; j++)
+				{
+					std::string kmerstrfromfastq = chunks[i].substr(j, bpars.kmerSize);
+					Kmer mykmer(kmerstrfromfastq.c_str(), kmerstrfromfastq.length());
+					// remember to use only ::rep() when building kmerdict as well
+					Kmer lexsmall;
+					if (bpars.useHOPC)
+					{
+						lexsmall = mykmer.hopc();
+					}
+					else
+					{
+						// remember to use only ::rep() when building kmerdict as well
+						lexsmall = mykmer.rep();
+					}
+
+					KMERINDEX idx; // kmer_id
+					auto found = countsreliable.find(lexsmall,idx);
+					if(found)
+					{
+						//alloccurrences[MYTHREAD].emplace_back(std::make_tuple(numReads+i, idx, j)); // vector<tuple<numReads,kmer_id,kmerpos>>
+						allreferencetuples[MYTHREAD].emplace_back(std::make_tuple(idx, numChunks + i, j)); // transtuples.push_back(col_id,row_id,kmerpos)
+					}
+				}
+			}
+		} // for(int i=0; i<nreads; i++)
+		numChunks += nChunks;
+	} //while(fillstatus) 
+	delete pfq;
+
+
+	KMERINDEX refreadscount = 0;
+	KMERINDEX reftuplecount = 0;
+
+	for(int t=0; t<MAXTHREADS; ++t)
+	{
+		reftuplecount += allreferencetuples[t].size();
+		refreadscount += allrefchunks[t].size();
+	}
+
+	referencetuples.resize(reftuplecount);
+	refreads.resize(refreadscount);
+
+	printLog(numChunks);
+	printLog(refreadscount);
+
+
+	unsigned int reftuplesofar = 0;
+	unsigned int refreadssofar= 0;
+
+	for(int t=0; t<MAXTHREADS; ++t)
+	{
+		//copy(alloccurrences[t].begin(), alloccurrences[t].end(), occurrences.begin() + tuplesofar);
+		copy(allreferencetuples[t].begin(), allreferencetuples[t].end(), referencetuples.begin() + reftuplesofar);
+		reftuplesofar += allreferencetuples[t].size();
+
+		copy(allrefchunks[t].begin(), allrefchunks[t].end(), refreads.begin()+refreadssofar);
+		refreadssofar += allrefchunks[t].size();
+	}
+
+	std::vector<string>().swap(seqs);		// free memory of seqs  
+	std::vector<string>().swap(quals);		// free memory of quals
+
+	std::string ReferenceParsingTime = std::to_string(omp_get_wtime() - ref_parsing) + " seconds";
+	printLog(ReferenceParsingTime);
+	printLog(numChunks);
 
 	// ====================== //
 	// Sparse Matrix Creation //
@@ -470,7 +661,8 @@ int main (int argc, char *argv[]) {
 	unsigned int nkmer = countsreliable.size();
 	
 	// to help the parsing script
-    cout << nkmer << endl;
+    //cout << nkmer << endl;
+	printLog(nkmer);
 	
 	double matcreat = omp_get_wtime();
 	CSC<KMERINDEX, unsigned short int> transpmat(transtuples, nkmer, numReads,
@@ -490,39 +682,63 @@ int main (int argc, char *argv[]) {
 	std::string ReTransposeTime = std::to_string(omp_get_wtime() - transbeg) + " seconds";
 	printLog(ReTransposeTime);
 
+	double createrefmat = omp_get_wtime();
+
+	CSC<KMERINDEX, unsigned short int> refmat(referencetuples, nkmer, numChunks,
+							[](unsigned short int& p1, unsigned short int& p2)
+							{
+								return p1;
+							}, false);
+	std::vector<tuple<KMERINDEX, KMERINDEX, unsigned short int>>().swap(referencetuples);
+
+	std::string RefMatTime = std::to_string(omp_get_wtime() - createrefmat) + " seconds";
+	printLog(RefMatTime);
 
 	// ==================================================== //
 	// Sparse Matrix Multiplication (aka Overlap Detection) //
 	// ==================================================== //
 		
-	spmatPtr_ getvaluetype(make_shared<spmatType_>());
+	spmatPtr_ getvaluetype(make_shared<spmatRefType_>());
 	HashSpGEMM(
-		spmat, transpmat, 
+		spmat, refmat, 
 		// n-th k-mer positions on read i and on read j
-	    [&bpars, &reads] (const unsigned short int& begpH, const unsigned short int& begpV, 
+	    [&bpars, &reads, &refreads] (const unsigned short int& begpH, const unsigned short int& begpV, 
 	        const unsigned int& id1, const unsigned int& id2)
 		{
-			spmatPtr_ value(make_shared<spmatType_>());
+			spmatPtr_ value(make_shared<spmatRefType_>()); // this is now just count and a vec of pair position
 
-			std::string& read1 = reads[id1].seq;
-			std::string& read2 = reads[id2].seq;
+			// GGGG: Code using David's types
+			value->count = 1;
+
+			pair<unsigned short int, unsigned short int> mypair = std::make_pair(begpH, begpV); 
+			value->pos.push_back(mypair);
+
+			/* GGGG: BELLA's default code
+			// std::string& read1 = reads[id1].seq;
+			// std::string& read2 = reads[id2].seq;
 
 			// GG: function in chain.h
-			multiop(value, read1, read2, begpH, begpV, bpars.kmerSize);
+			// multiop(value, read1, read2, begpH, begpV, bpars.kmerSize);
+			*/
+
 			return value;
 		},
-	    [&bpars, &reads] (spmatPtr_& m1, spmatPtr_& m2, const unsigned int& id1, 
-	        const unsigned int& id2)
+	    [&bpars, &reads, &refreads] (spmatPtr_& m1, spmatPtr_& m2)
 		{
+			// GGGG: Code using David's types
+			m1->count = m1->count + m2->count;
+			m1->pos.insert(m1->pos.end(), m2->pos.begin(), m2->pos.end());
+
+			/* GGGG: BELLA's default code
 			// GG: after testing correctness, these variables can be removed
-			std::string& readname1 = reads[id1].nametag;
-			std::string& readname2 = reads[id2].nametag;
 
 			// GG: function in chain.h
-			chainop(m1, m2, bpars, readname1, readname2);
+			// chainop(m1, m2, bpars);
+			*/
+
 			return m1;
 		},
-	    reads, getvaluetype, OutputFile, bpars, ratiophi);
+	    reads, refreads, getvaluetype, OutputFile, bpars, ratiophi);
 
 	double totaltime = omp_get_wtime()-all;
 
